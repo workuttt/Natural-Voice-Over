@@ -101,7 +101,7 @@ async function startServer() {
   let serverTtsInstance: any = null;
   app.post('/api/tts/generate', async (req, res) => {
     try {
-      const { text, voice = 'af_heart', speed = 1.0, dtype = 'q8' } = req.body;
+      const { text, voice = 'af_heart', speed = 1.0, dtype = 'q8', blend } = req.body;
       if (!text || typeof text !== 'string' || !text.trim()) {
         return res.status(400).json({ error: 'Text prompt is required.' });
       }
@@ -114,13 +114,39 @@ async function startServer() {
         });
       }
 
-      const audio = await serverTtsInstance.generate(text.trim(), {
-        voice,
-        speed: Number(speed) || 1.0,
-      });
+      let audioData: Float32Array;
+      let sampleRate: number = 24000;
 
-      const audioData: Float32Array = audio.audio;
-      const sampleRate: number = audio.sampling_rate || 24000;
+      if (blend && blend.enabled && blend.secondaryVoiceId && blend.secondaryVoiceId !== voice) {
+        // Dual voice synthesis and harmonic blend
+        const [audioPrimary, audioSecondary] = await Promise.all([
+          serverTtsInstance.generate(text.trim(), { voice, speed: Number(speed) || 1.0 }),
+          serverTtsInstance.generate(text.trim(), { voice: blend.secondaryVoiceId, speed: Number(speed) || 1.0 }),
+        ]);
+
+        const pData: Float32Array = audioPrimary.audio;
+        const sData: Float32Array = audioSecondary.audio;
+        sampleRate = audioPrimary.sampling_rate || 24000;
+
+        const maxLen = Math.max(pData.length, sData.length);
+        audioData = new Float32Array(maxLen);
+        const wSec = Math.max(0, Math.min(1, Number(blend.blendRatio) || 0.35));
+        const wPri = 1 - wSec;
+
+        for (let i = 0; i < maxLen; i++) {
+          const p = i < pData.length ? pData[i] : 0;
+          const s = i < sData.length ? sData[i] : 0;
+          audioData[i] = p * wPri + s * wSec;
+        }
+      } else {
+        const audio = await serverTtsInstance.generate(text.trim(), {
+          voice,
+          speed: Number(speed) || 1.0,
+        });
+        audioData = audio.audio;
+        sampleRate = audio.sampling_rate || 24000;
+      }
+
       const duration = audioData.length / sampleRate;
 
       // Convert Float32Array to 16-bit PCM WAV buffer

@@ -15,13 +15,15 @@ import {
   HelpCircle,
   FileAudio,
 } from 'lucide-react';
-import { VoiceId, ModelDtype, DeviceType, ModelLoadingState, AudioClip } from './types';
+import { VoiceId, ModelDtype, DeviceType, ModelLoadingState, AudioClip, VoiceStyleConfig } from './types';
 import { VOICES_DATA } from './data/voices';
 import { PRESET_TEXTS } from './data/presets';
+import { DEFAULT_VOICE_STYLE_CONFIG } from './data/stylePresets';
 import { kokoroService } from './services/kokoroService';
 import { Header } from './components/Header';
 import { ModelStatusBar } from './components/ModelStatusBar';
 import { VoiceSelector } from './components/VoiceSelector';
+import { VoiceStylingPanel } from './components/VoiceStylingPanel';
 import { TextInputArea } from './components/TextInputArea';
 import { AudioPlayer } from './components/AudioPlayer';
 import { HistoryList } from './components/HistoryList';
@@ -31,6 +33,7 @@ export default function App() {
   const [text, setText] = useState<string>(PRESET_TEXTS[0].text);
   const [selectedVoiceId, setSelectedVoiceId] = useState<VoiceId>('af_heart');
   const [speed, setSpeed] = useState<number>(1.0);
+  const [styleConfig, setStyleConfig] = useState<VoiceStyleConfig>(DEFAULT_VOICE_STYLE_CONFIG);
   const [dtype, setDtype] = useState<ModelDtype>('q8');
   const [device, setDevice] = useState<DeviceType>('wasm');
   const [streamingMode, setStreamingMode] = useState<boolean>(false);
@@ -86,14 +89,23 @@ export default function App() {
         selectedVoiceId,
         speed,
         dtype,
-        device
+        device,
+        styleConfig
       );
+
+      const secondaryVoiceInfo = styleConfig.blend.enabled
+        ? VOICES_DATA.find((v) => v.id === styleConfig.blend.secondaryVoiceId)
+        : null;
+
+      const displayName = secondaryVoiceInfo
+        ? `${voiceInfo.name} + ${secondaryVoiceInfo.name} (${Math.round((1 - styleConfig.blend.blendRatio) * 100)}/${Math.round(styleConfig.blend.blendRatio * 100)})`
+        : voiceInfo.name;
 
       const newClip: AudioClip = {
         id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         text: text.trim(),
         voiceId: selectedVoiceId,
-        voiceName: voiceInfo.name,
+        voiceName: displayName,
         timestamp: Date.now(),
         duration: result.duration,
         blobUrl: result.blobUrl,
@@ -102,6 +114,7 @@ export default function App() {
         speed,
         samplesCount: result.samplesCount,
         waveformData: result.peaks,
+        styleConfig: { ...styleConfig },
       };
 
       setActiveClip(newClip);
@@ -194,6 +207,14 @@ export default function App() {
                 disabled={isGenerating}
               />
             </div>
+
+            {/* Voice Styling, Blending & Studio Acoustic Effects */}
+            <VoiceStylingPanel
+              primaryVoiceId={selectedVoiceId}
+              styleConfig={styleConfig}
+              onChangeStyleConfig={setStyleConfig}
+              disabled={isGenerating}
+            />
 
             {/* Text Input Area with Presets & Speed Slider */}
             <TextInputArea

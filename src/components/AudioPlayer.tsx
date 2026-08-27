@@ -218,7 +218,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ clip }) => {
             <FileAudio className="w-4 h-4" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-sm text-white">{clip.voiceName}</span>
               <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-800/60 text-slate-300 border border-slate-700/60">
                 {clip.voiceId}
@@ -226,6 +226,16 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ clip }) => {
               <span className="text-xs text-cyan-400 font-mono">
                 {clip.sampleRate / 1000} kHz WAV
               </span>
+              {clip.styleConfig?.presetId && clip.styleConfig.presetId !== 'natural' && (
+                <span className="text-[10px] font-semibold px-2 py-0.2 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  {clip.styleConfig.presetId.replace('_', ' ')}
+                </span>
+              )}
+              {clip.styleConfig?.pitch !== 0 && clip.styleConfig?.pitch !== undefined && (
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-cyan-300 border border-slate-700">
+                  {clip.styleConfig.pitch > 0 ? `+${clip.styleConfig.pitch}st` : `${clip.styleConfig.pitch}st`}
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-400 truncate max-w-md mt-0.5" title={clip.text}>
               "{clip.text}"

@@ -1,6 +1,7 @@
 import { KokoroTTS } from 'kokoro-js';
-import { ModelDtype, DeviceType, ModelLoadingState, VoiceId, ProgressItem } from '../types';
+import { ModelDtype, DeviceType, ModelLoadingState, VoiceId, ProgressItem, VoiceStyleConfig } from '../types';
 import { encodeWav, extractPeaks } from '../utils/wavHelper';
+import { applyAcousticStyling } from '../utils/audioEffects';
 
 export const DEFAULT_MODEL_ID = 'onnx-community/Kokoro-82M-v1.0-ONNX';
 
@@ -190,7 +191,7 @@ class KokoroService {
   }
 
   /**
-   * Generates audio from text using specified voice and speed.
+   * Generates audio from text using specified voice, speed, and optional voice styling.
    * Seamlessly tries browser ONNX execution first, with transparent server fallback.
    */
   public async generateSpeech(
@@ -198,7 +199,8 @@ class KokoroService {
     voice: VoiceId = 'af_heart',
     speed: number = 1.0,
     dtype: ModelDtype = 'q8',
-    device: DeviceType = 'wasm'
+    device: DeviceType = 'wasm',
+    styleConfig?: VoiceStyleConfig
   ): Promise<{
     blob: Blob;
     blobUrl: string;
@@ -214,6 +216,40 @@ class KokoroService {
     this.isSynthesizing = true;
     const startTime = performance.now();
 
+    // Helper to apply acoustic styling post-processing
+    const postProcessAudio = async (
+      rawAudioData: Float32Array,
+      sampleRate: number
+    ): Promise<{
+      blob: Blob;
+      blobUrl: string;
+      duration: number;
+      sampleRate: number;
+      samplesCount: number;
+      peaks: number[];
+    }> => {
+      if (!styleConfig) {
+        const wavBlob = encodeWav(rawAudioData, sampleRate);
+        return {
+          blob: wavBlob,
+          blobUrl: URL.createObjectURL(wavBlob),
+          duration: rawAudioData.length / sampleRate,
+          sampleRate,
+          samplesCount: rawAudioData.length,
+          peaks: extractPeaks(rawAudioData, 72),
+        };
+      }
+
+      // Create AudioBuffer from Float32Array
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate });
+      const audioBuffer = audioCtx.createBuffer(1, rawAudioData.length, sampleRate);
+      audioBuffer.copyToChannel(rawAudioData, 0);
+
+      const processed = await applyAcousticStyling(audioBuffer, styleConfig);
+      audioCtx.close();
+      return processed;
+    };
+
     // 1. Try Browser In-Memory KokoroTTS
     try {
       let tts = this.ttsInstance;
@@ -222,42 +258,49 @@ class KokoroService {
       }
 
       if (tts && typeof tts.generate === 'function') {
-        const rawAudio = await tts.generate(text.trim(), {
-          voice,
-          speed,
-        });
+        let audioData: Float32Array;
+        let sampleRate = 24000;
 
-        const audioData: Float32Array = rawAudio.audio;
-        const sampleRate: number = rawAudio.sampling_rate || 24000;
-        const duration: number = audioData.length / sampleRate;
+        if (
+          styleConfig?.blend?.enabled &&
+          styleConfig.blend.secondaryVoiceId &&
+          styleConfig.blend.secondaryVoiceId !== voice
+        ) {
+          // Dual Voice Browser Synthesis
+          const [primaryRaw, secondaryRaw] = await Promise.all([
+            tts.generate(text.trim(), { voice, speed }),
+            tts.generate(text.trim(), { voice: styleConfig.blend.secondaryVoiceId, speed }),
+          ]);
 
-        // Create robust 16-bit PCM WAV Blob
-        let wavBlob: Blob;
-        if (typeof rawAudio.toBlob === 'function') {
-          try {
-            wavBlob = rawAudio.toBlob();
-          } catch {
-            wavBlob = encodeWav(audioData, sampleRate);
+          const pData: Float32Array = primaryRaw.audio;
+          const sData: Float32Array = secondaryRaw.audio;
+          sampleRate = primaryRaw.sampling_rate || 24000;
+
+          const maxLen = Math.max(pData.length, sData.length);
+          audioData = new Float32Array(maxLen);
+          const wSec = Math.max(0, Math.min(1, styleConfig.blend.blendRatio));
+          const wPri = 1 - wSec;
+
+          for (let i = 0; i < maxLen; i++) {
+            const p = i < pData.length ? pData[i] : 0;
+            const s = i < sData.length ? sData[i] : 0;
+            audioData[i] = p * wPri + s * wSec;
           }
         } else {
-          wavBlob = encodeWav(audioData, sampleRate);
+          const rawAudio = await tts.generate(text.trim(), {
+            voice,
+            speed,
+          });
+          audioData = rawAudio.audio;
+          sampleRate = rawAudio.sampling_rate || 24000;
         }
 
-        const blobUrl = URL.createObjectURL(wavBlob);
-        const peaks = extractPeaks(audioData, 72);
-
+        const processed = await postProcessAudio(audioData, sampleRate);
         const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-        console.log(`[Browser ONNX] Generated ${duration.toFixed(2)}s audio in ${elapsed}s (Voice: ${voice})`);
+        console.log(`[Browser ONNX] Generated ${processed.duration.toFixed(2)}s audio in ${elapsed}s (Voice: ${voice})`);
 
         this.isSynthesizing = false;
-        return {
-          blob: wavBlob,
-          blobUrl,
-          duration,
-          sampleRate,
-          samplesCount: audioData.length,
-          peaks,
-        };
+        return processed;
       }
     } catch (browserErr) {
       console.warn('Browser ONNX synthesis failed, engaging Server TTS engine...', browserErr);
@@ -275,6 +318,7 @@ class KokoroService {
           voice,
           speed,
           dtype,
+          blend: styleConfig?.blend,
         }),
       });
 
@@ -283,42 +327,24 @@ class KokoroService {
         throw new Error(errJson.error || `Server synthesis returned HTTP ${response.status}`);
       }
 
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const durationHeader = response.headers.get('X-Audio-Duration');
+      const rawBlob = await response.blob();
       const sampleRateHeader = response.headers.get('X-Audio-Sample-Rate');
-
       const sampleRate = sampleRateHeader ? parseInt(sampleRateHeader, 10) : 24000;
-      let duration = durationHeader ? parseFloat(durationHeader) : 0;
 
-      // Decode audio buffer for visual waveform peak calculation
-      let peaks: number[] = [];
-      let samplesCount = 0;
-      try {
-        const arrayBuffer = await blob.arrayBuffer();
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate });
-        const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-        duration = duration || decodedBuffer.duration;
-        samplesCount = decodedBuffer.length;
-        const channelData = decodedBuffer.getChannelData(0);
-        peaks = extractPeaks(channelData, 72);
-        audioCtx.close();
-      } catch {
-        peaks = Array.from({ length: 72 }, (_, i) => 0.2 + 0.6 * Math.abs(Math.sin(i * 0.25)));
-      }
+      // Decode audio data from server WAV to apply any client-side tone styling
+      const arrayBuffer = await rawBlob.arrayBuffer();
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate });
+      const decodedBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      const channelData = decodedBuffer.getChannelData(0);
+
+      const processed = await postProcessAudio(channelData, sampleRate);
+      audioCtx.close();
 
       const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-      console.log(`[Server Kokoro] Generated ${duration.toFixed(2)}s audio in ${elapsed}s`);
+      console.log(`[Server Kokoro] Generated ${processed.duration.toFixed(2)}s audio in ${elapsed}s`);
 
       this.isSynthesizing = false;
-      return {
-        blob,
-        blobUrl,
-        duration: duration || 2.0,
-        sampleRate,
-        samplesCount,
-        peaks,
-      };
+      return processed;
     } catch (serverErr: any) {
       this.isSynthesizing = false;
       console.error('All TTS synthesis pathways failed:', serverErr);

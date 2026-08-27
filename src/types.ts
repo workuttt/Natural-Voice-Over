@@ -63,6 +63,42 @@ export interface ModelLoadingState {
   files: Record<string, { loaded: number; total: number; progress: number; name: string }>;
 }
 
+export interface VoiceBlendConfig {
+  enabled: boolean;
+  secondaryVoiceId: VoiceId;
+  blendRatio: number; // 0.0 to 1.0 (weight of secondary voice)
+}
+
+export type AcousticStylePresetId =
+  | 'natural'
+  | 'broadcast'
+  | 'cinematic'
+  | 'whisper'
+  | 'energetic'
+  | 'vintage_radio';
+
+export interface AcousticStylePreset {
+  id: AcousticStylePresetId;
+  name: string;
+  description: string;
+  icon: string;
+  pitch: number; // in semitones (-12 to +12)
+  bassGain: number; // in dB (-12 to +12)
+  trebleGain: number; // in dB (-12 to +12)
+  reverbAmount: number; // 0.0 to 1.0
+  compression: boolean;
+}
+
+export interface VoiceStyleConfig {
+  presetId: AcousticStylePresetId;
+  pitch: number; // -12 to +12 semitones
+  bassGain: number; // -12 to +12 dB
+  trebleGain: number; // -12 to +12 dB
+  reverbAmount: number; // 0 to 1
+  compression: boolean;
+  blend: VoiceBlendConfig;
+}
+
 export interface AudioClip {
   id: string;
   text: string;
@@ -76,6 +112,7 @@ export interface AudioClip {
   speed: number;
   samplesCount: number;
   waveformData?: number[]; // normalized peaks 0-1 for fast waveform rendering
+  styleConfig?: VoiceStyleConfig;
 }
 
 export interface PresetText {

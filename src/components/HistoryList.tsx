@@ -84,13 +84,18 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                 className="min-w-0 flex-1 cursor-pointer"
                 onClick={() => onSelectClip(item)}
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-semibold text-xs text-slate-100">
                     {item.voiceName}
                   </span>
                   <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-900/80 text-slate-400 border border-slate-800">
                     {item.voiceId}
                   </span>
+                  {item.styleConfig?.presetId && item.styleConfig.presetId !== 'natural' && (
+                    <span className="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                      {item.styleConfig.presetId.replace('_', ' ')}
+                    </span>
+                  )}
                   <span className="text-[11px] font-mono text-cyan-400 font-medium">
                     {formatDuration(item.duration)}
                   </span>
