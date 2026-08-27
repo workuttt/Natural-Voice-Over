@@ -57,9 +57,19 @@ export class ErrorBoundary extends React.Component<Props, State> {
             </div>
 
             <div className="space-y-2">
-              <h1 className="text-xl font-bold text-white">Application Notice</h1>
+              <h1 className="text-xl font-bold text-white">
+                {this.state.error?.message?.toLowerCase().includes('wasm') ||
+                this.state.error?.message?.toLowerCase().includes('onnx') ||
+                this.state.error?.message?.toLowerCase().includes('fetch') ||
+                this.state.error?.message?.toLowerCase().includes('model')
+                  ? 'Neural Model / WebAssembly Notice'
+                  : 'Application Notice'}
+              </h1>
               <p className="text-sm text-slate-400">
-                An unexpected interface issue occurred. You can reload the app or reset cached states.
+                {this.state.error?.message?.toLowerCase().includes('wasm') ||
+                this.state.error?.message?.toLowerCase().includes('onnx')
+                  ? 'The client-side WebAssembly/ONNX runtime encountered an environment limitation. You can reload or reset the browser model cache.'
+                  : 'An unexpected interface issue occurred. You can reload the app or reset cached states.'}
               </p>
             </div>
 
