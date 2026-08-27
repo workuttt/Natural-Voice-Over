@@ -1,0 +1,6 @@
+{
+  "name": "Kokoro Text-to-Speech",
+  "description": "A modern client-side text-to-speech application powered by Kokoro-82M ONNX WebAssembly running 100% in the browser.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
